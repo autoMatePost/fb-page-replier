@@ -160,6 +160,14 @@ def graph_post(path, params=None):
 def page_token():
     tok = session.get("page_token")
     if not tok:
+        # Fall back to the server-side store — it holds the durable copy of
+        # the selected Page's token even if the browser session cookie did
+        # not carry the selection over.
+        store = load_store()
+        pid = session.get("page_id") or store.get("selected_page_id")
+        page = (store.get("pages") or {}).get(str(pid)) or {}
+        tok = page.get("access_token")
+    if not tok:
         raise RuntimeError("Page not selected. Login again.")
     return tok
 
@@ -396,7 +404,7 @@ def api_comments():
         post_id = resolve_post_id(body.get("post_input", ""))
         hours = float(body.get("hours", 48))
         tok = page_token()
-        page_id = session.get("page_id")
+        page_id = session.get("page_id") or load_store().get("selected_page_id")
 
         # sanity check: post exists and is visible to this page token
         try:
