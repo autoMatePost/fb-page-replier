@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# Secrets & runtime state — NEVER commit these (the repo is public;
+# app secrets go into the host's environment variables instead)
+.env
+fb_store.json
+watches.json
+sent_replies.json

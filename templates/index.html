@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Facebook Page Comment Replier</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; max-width: 760px; margin: 0 auto; padding: 20px; background: #f0f2f5; color: #1c1e21; }
+  .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 0 0 10px; }
+  .sub { color: #65676b; font-size: 14px; margin-bottom: 14px; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .stepnum { display: inline-block; background: #1877f2; color: #fff; width: 26px; height: 26px; border-radius: 50%; text-align: center; line-height: 26px; font-size: 14px; font-weight: 700; margin-right: 8px; }
+  button { background: #1877f2; color: #fff; border: none; border-radius: 8px; padding: 11px 20px; font-size: 15px; cursor: pointer; margin-top: 10px; }
+  button:disabled { background: #bcc0c4; cursor: not-allowed; }
+  button.secondary { background: #e4e6eb; color: #1c1e21; }
+  button.danger { background: #e0245e; }
+  input[type=text], input[type=number], textarea, select { width: 100%; padding: 11px; border: 1px solid #ccd0d5; border-radius: 8px; font-size: 15px; margin-top: 6px; font-family: inherit; }
+  textarea { min-height: 130px; resize: vertical; }
+  label { font-weight: 600; font-size: 14px; display: block; margin-top: 12px; }
+  .hint { font-size: 13px; color: #65676b; margin-top: 4px; }
+  .err { background: #fde8e8; color: #b3261e; padding: 12px; border-radius: 8px; margin-top: 12px; font-size: 14px; display: none; }
+  .ok { background: #e7f6e7; color: #1a6b1a; padding: 12px; border-radius: 8px; margin-top: 12px; font-size: 14px; display: none; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 14px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid #e4e6eb; vertical-align: top; }
+  th { background: #f5f6f7; }
+  .msg { max-width: 420px; word-break: break-word; }
+  .progress { height: 12px; background: #e4e6eb; border-radius: 6px; overflow: hidden; margin-top: 12px; }
+  .progress > div { height: 100%; background: #1877f2; width: 0%; transition: width .3s; }
+  .status-line { font-size: 14px; margin-top: 10px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+  .pill.pending { background: #fff4d6; color: #8a6d00; }
+  .pill.sent { background: #e7f6e7; color: #1a6b1a; }
+  .pill.failed { background: #fde8e8; color: #b3261e; }
+  #commentList { max-height: 320px; overflow-y: auto; border: 1px solid #e4e6eb; border-radius: 8px; }
+  .toolbar { margin: 10px 0; font-size: 14px; }
+  .toolbar a { color: #1877f2; cursor: pointer; margin-right: 14px; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>💬 Facebook Page Comment Replier</h1>
+<p class="sub">Runs on your own computer. Replies are posted <b>as your Page</b>.</p>
+
+<!-- STEP 1 -->
+<div class="card step active" id="step1">
+  <h2><span class="stepnum">1</span> Connect Facebook</h2>
+  <div id="loginArea">
+    <p class="sub">Login with the Facebook account that manages your Page.</p>
+    <button onclick="location.href='/api/login'">Login with Facebook</button>
+    <div class="err" id="cfgErr">FB_APP_ID / FB_APP_SECRET not set. Follow README.md step 1 first.</div>
+  </div>
+  <div id="loggedInArea" style="display:none">
+    <p>Logged in as <b id="fbName"></b></p>
+    <button class="secondary" onclick="logout()">Logout</button>
+  </div>
+</div>
+
+<!-- STEP 2 -->
+<div class="card step" id="step2">
+  <h2><span class="stepnum">2</span> Choose Page &amp; Post</h2>
+  <label>Your Pages</label>
+  <select id="pageSelect"></select>
+  <label>Post / Reel link or post ID</label>
+  <input type="text" id="postInput" placeholder="https://www.facebook.com/reel/123456789...">
+  <div class="hint">Open the reel in your browser and copy the address-bar URL (facebook.com/reel/…). Share links (/share/…) won't work here.</div>
+  <label>Only comments from the last (hours)</label>
+  <input type="number" id="hoursInput" value="48" min="1" max="720">
+  <br><button id="fetchBtn" onclick="fetchComments()">Fetch comments</button>
+  <div class="err" id="fetchErr"></div>
+  <div class="ok" id="fetchOk"></div>
+</div>
+
+<!-- STEP 3 -->
+<div class="card step" id="step3">
+  <h2><span class="stepnum">3</span> Review &amp; confirm comments</h2>
+  <p class="sub" id="reviewSummary"></p>
+  <div class="toolbar">
+    <a onclick="toggleAll(true)">Select all</a><a onclick="toggleAll(false)">Select none</a>
+  </div>
+  <div id="commentList"><table><thead><tr><th></th><th>Who</th><th>Comment</th><th>When</th></tr></thead><tbody id="commentRows"></tbody></table></div>
+  <br><button id="toStep4" onclick="goStep(4)">Confirm selection</button>
+</div>
+
+<!-- STEP 4 -->
+<div class="card step" id="step4">
+  <h2><span class="stepnum">4</span> Reply text &amp; send</h2>
+  <label>Reply text (sent to every selected comment)</label>
+  <textarea id="replyText" placeholder="Paste your reply here…"></textarea>
+  <label>Wait between replies (seconds) — slower is safer</label>
+  <input type="number" id="delayInput" value="30" min="5" max="600">
+  <div class="hint">Sending the identical message too fast can trigger Facebook spam limits. 30s+ recommended.</div>
+  <br>
+  <button class="danger" id="sendBtn" onclick="startSending()">Start sending</button>
+  <button class="secondary" id="stopBtn" onclick="stopSending()" disabled>Stop</button>
+  <div class="progress"><div id="bar"></div></div>
+  <div class="status-line" id="statusLine"></div>
+  <div class="err" id="sendErr"></div>
+</div>
+
+<!-- WATCHED POSTS -->
+<div class="card" id="watchCard" style="display:none">
+  <h2>⚡ Watched Posts — auto reply (kai posts ek sath)</h2>
+  <p class="sub">Jitne chaho utne posts add karo — har post ke liye apna reply text. Kisi post ko list me <b>add karne ke baad</b> jo naye comments aayenge, unko hi auto reply jayega; usse pehle wale comments ko nahi. Page ke khud ke comments skip hote hain, aur ek comment pe dobara reply kabhi nahi jayega. Purane comments ke liye upar wala manual tareeka (Step 3–4) use karo.</p>
+  <label>Post / Reel link ya post ID</label>
+  <input type="text" id="watchPostInput" placeholder="https://www.facebook.com/reel/123456789...">
+  <div class="hint">Upar Step 2 me jo <b>Page</b> select hai, post usi Page ki honi chahiye. Address-bar wala link dalo — share links (/share/…) nahi chalenge.</div>
+  <label>Reply text (is post ke har naye comment pe yahi jayega)</label>
+  <textarea id="watchText">कमेंट करने के लिए धन्यवाद! ❤️🥰
+
+ये रहा आपके प्रोडक्ट का लिंक 🛍️👇
+
+https://www.meesho.com/af_invite/32788218:facebook:13675366?p_id=1117118993&amp;ext_id=ih3qj5&amp;utm_source=facebook
+
+अच्छी शॉपिंग करें! 💖✨</textarea>
+  <label>Har reply ke beech wait (seconds) — slower is safer</label>
+  <input type="number" id="watchDelay" value="60" min="20" max="600">
+  <br>
+  <button id="watchAddBtn" onclick="addWatch()">➕ Add to Watch List</button>
+  <div class="err" id="watchErr"></div>
+  <div class="ok" id="watchOk"></div>
+  <h2 style="margin-top:20px">Abhi watch ho rahe posts</h2>
+  <div class="status-line" id="watchManagerLine"></div>
+  <div id="watchList"><p class="sub">Koi post watch nahi ho raha.</p></div>
+  <div class="hint" style="margin-top:12px">⚠️ Auto reply tabhi chalega jab ye app <b>chalta rahe</b> — laptop band karne par replies ruk jayengi. Laptop off hone par bhi reply chahiye to is app ko kisi <b>hamesha-on server</b> pe chalao (README me hosting wala section dekho). Sirf add karne ke <b>baad</b> wale naye comments ko hi reply jata hai.</div>
+</div>
+
+<script>
+let COMMENTS = [], SENDING = false, POST_ID = "";
+
+function showErr(id, msg){ const e=document.getElementById(id); e.textContent=msg; e.style.display='block'; }
+function hideErr(id){ document.getElementById(id).style.display='none'; }
+function goStep(n){ document.querySelectorAll('.step').forEach(s=>s.classList.remove('active')); document.getElementById('step'+n).classList.add('active'); window.scrollTo(0,0); }
+
+async function init(){
+  const cfg = await (await fetch('/api/config')).json();
+  if(!cfg.configured){ document.getElementById('cfgErr').style.display='block'; return; }
+  const me = await (await fetch('/api/me')).json();
+  if(me.logged_in){
+    document.getElementById('loginArea').style.display='none';
+    document.getElementById('loggedInArea').style.display='block';
+    document.getElementById('fbName').textContent = me.name || '';
+    document.getElementById('watchCard').style.display='block';
+    goStep(2); loadPages(); loadWatches();
+  }
+}
+async function logout(){ await fetch('/api/logout',{method:'POST'}); location.reload(); }
+
+async function loadPages(){
+  const d = await (await fetch('/api/pages')).json();
+  const sel = document.getElementById('pageSelect'); sel.innerHTML='';
+  (d.pages||[]).forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name; sel.appendChild(o); });
+  if(!d.pages || !d.pages.length) showErr('fetchErr','No Pages found on this account. It must manage at least one Facebook Page.');
+}
+
+async function fetchComments(){
+  hideErr('fetchErr'); document.getElementById('fetchOk').style.display='none';
+  const btn=document.getElementById('fetchBtn'); btn.disabled=true; btn.textContent='Fetching…';
+  try{
+    const pageId = document.getElementById('pageSelect').value;
+    await fetch('/api/select-page',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:pageId})});
+    const r = await fetch('/api/comments',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({post_input:document.getElementById('postInput').value, hours:parseFloat(document.getElementById('hoursInput').value||48)})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Failed');
+    COMMENTS = d.comments; POST_ID = d.post_id;
+    document.getElementById('reviewSummary').textContent =
+      `${d.total} total comments · ${d.fresh} in range · ${d.already_replied} already replied (skipped) · ${COMMENTS.length} to send.`;
+    const tb=document.getElementById('commentRows'); tb.innerHTML='';
+    COMMENTS.forEach(c=>{
+      const tr=document.createElement('tr');
+      const when=new Date(c.created_time).toLocaleString();
+      tr.innerHTML=`<td><input type="checkbox" checked data-id="${c.id}"></td><td>${esc(c.from_name)}</td><td class="msg">${esc(c.message)}</td><td>${when}</td>`;
+      tb.appendChild(tr);
+    });
+    const ok=document.getElementById('fetchOk'); ok.textContent=`Found ${COMMENTS.length} comments to reply to.`; ok.style.display='block';
+    goStep(3);
+  }catch(e){ showErr('fetchErr', e.message); }
+  btn.disabled=false; btn.textContent='Fetch comments';
+}
+function esc(s){ return (s||'').replace(/[&<>"]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])); }
+function toggleAll(v){ document.querySelectorAll('#commentRows input[type=checkbox]').forEach(c=>c.checked=v); }
+function selectedIds(){ return [...document.querySelectorAll('#commentRows input[type=checkbox]:checked')].map(c=>c.dataset.id); }
+
+async function startSending(){
+  const ids = selectedIds();
+  const text = document.getElementById('replyText').value.trim();
+  if(!ids.length){ showErr('sendErr','Select at least one comment.'); return; }
+  if(!text){ showErr('sendErr','Paste the reply text first.'); return; }
+  hideErr('sendErr');
+  if(!confirm(`Send this reply to ${ids.length} comment(s) as your Page?`)) return;
+  const delay = Math.max(5, parseInt(document.getElementById('delayInput').value||30));
+  SENDING = true;
+  document.getElementById('sendBtn').disabled=true;
+  document.getElementById('stopBtn').disabled=false;
+  let done=0, failed=0;
+  const bar=document.getElementById('bar'), line=document.getElementById('statusLine');
+  // mark rows
+  document.querySelectorAll('#commentRows tr').forEach(tr=>{
+    const cb=tr.querySelector('input[type=checkbox]');
+    let pill=tr.querySelector('.pill');
+    if(!pill){ pill=document.createElement('span'); pill.className='pill pending'; tr.cells[0].appendChild(pill); }
+    pill.className='pill '+(cb.checked?'pending':'');
+    pill.textContent=cb.checked?'pending':'skipped';
+  });
+  for(const cid of ids){
+    if(!SENDING) break;
+    line.textContent=`Sending ${done+failed+1}/${ids.length}… (waiting ${delay}s between replies)`;
+    try{
+      const r = await fetch('/api/send-one',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({comment_id:cid, post_id:POST_ID, text})});
+      const d = await r.json();
+      const pill=document.querySelector(`#commentRows input[data-id="${cid}"]`).closest('tr').querySelector('.pill');
+      if(d.ok){ done++; pill.className='pill sent'; pill.textContent='sent'; }
+      else{ failed++; pill.className='pill failed'; pill.textContent='failed'; console.warn(cid, d.error); }
+    }catch(e){ failed++; }
+    bar.style.width = Math.round((done+failed)/ids.length*100)+'%';
+    if(ids.indexOf(cid) < ids.length-1){
+      for(let s=delay; s>0 && SENDING; s--){ line.textContent=`Next reply in ${s}s… (${done} sent, ${failed} failed)`; await new Promise(r=>setTimeout(r,1000)); }
+    }
+  }
+  SENDING=false;
+  document.getElementById('sendBtn').disabled=false;
+  document.getElementById('stopBtn').disabled=true;
+  line.textContent=`Done: ${done} sent, ${failed} failed, ${ids.length-done-failed} stopped/skipped.`;
+}
+function stopSending(){ SENDING=false; }
+
+let WATCHES = [];
+async function loadWatches(){
+  try{
+    const d = await (await fetch('/api/watches')).json();
+    WATCHES = d.watches || [];
+    renderWatches(d);
+  }catch(e){ /* app restarting etc. — next poll will recover */ }
+}
+function renderWatches(d){
+  const box = document.getElementById('watchList');
+  document.getElementById('watchManagerLine').textContent =
+    `Watcher: ${d.running ? 'ON' : 'OFF'} · har ${d.poll_interval||120}s me saare watched posts check hote hain`;
+  if(!WATCHES.length){ box.innerHTML = '<p class="sub">Koi post watch nahi ho raha.</p>'; return; }
+  let html = '<table><thead><tr><th>Post</th><th>Page</th><th>Status</th><th>Replies</th><th>Last check / error</th><th></th></tr></thead><tbody>';
+  WATCHES.forEach((w,i)=>{
+    const s = w.stats || {};
+    const status = w.active ? '<span class="pill sent">Active</span>' : '<span class="pill pending">Paused</span>';
+    const last = s.last_error ? `<span style="color:#b3261e">${esc(s.last_error)}</span>`
+               : (s.last_check ? new Date(s.last_check).toLocaleTimeString() : '—');
+    html += `<tr><td class="msg">${esc(w.post_id)}</td><td>${esc(w.page_name || w.page_id)}</td><td>${status}</td>` +
+      `<td>${w.sent_total||0} total<br><span class="hint">${s.sent||0} is session me</span></td><td class="msg">${last}</td>` +
+      `<td><button class="secondary" onclick="toggleWatch(${i})">${w.active ? 'Pause' : 'Resume'}</button> ` +
+      `<button class="danger" onclick="deleteWatch(${i})">Remove</button></td></tr>`;
+  });
+  html += '</tbody></table>';
+  box.innerHTML = html;
+}
+async function addWatch(){
+  hideErr('watchErr'); document.getElementById('watchOk').style.display='none';
+  const text = document.getElementById('watchText').value.trim();
+  const post = document.getElementById('watchPostInput').value.trim();
+  if(!post){ showErr('watchErr','Post / Reel link dalo.'); return; }
+  if(!text){ showErr('watchErr','Reply text is empty.'); return; }
+  if(!confirm('Is post ko watch list me add karun? Add karne ke baad aane wale HAR naye comment ko ye reply apne aap jayega.')) return;
+  try{
+    const pageId = document.getElementById('pageSelect').value;
+    await fetch('/api/select-page',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page_id:pageId})});
+    const r = await fetch('/api/watches',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({post_input:post, text, page_id:pageId,
+        delay:parseInt(document.getElementById('watchDelay').value||60)})});
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error||'Add failed');
+    const ok = document.getElementById('watchOk');
+    ok.textContent = `Post ${d.post_id} watch list me add ho gaya.`; ok.style.display='block';
+    document.getElementById('watchPostInput').value='';
+  }catch(e){ showErr('watchErr', e.message); }
+  loadWatches();
+}
+async function toggleWatch(i){
+  const r = await fetch(`/api/watches/${i}/toggle`,{method:'POST'});
+  const d = await r.json();
+  if(!r.ok) showErr('watchErr', d.error||'Toggle failed');
+  loadWatches();
+}
+async function deleteWatch(i){
+  if(!confirm('Ye post watch list se hataye?')) return;
+  await fetch(`/api/watches/${i}/delete`,{method:'POST'});
+  loadWatches();
+}
+setInterval(()=>{ const c=document.getElementById('watchCard'); if(c && c.style.display!=='none') loadWatches(); }, 5000);
+
+init();
+</script>
+</body>
+</html>
