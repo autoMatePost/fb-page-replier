@@ -40,6 +40,7 @@ STORE_FILE = os.path.join(BASE_DIR, "fb_store.json")  # server-side tokens: user
 STORE_LOCK = threading.Lock()  # guards fb_store.json
 WATCHES_FILE = os.path.join(BASE_DIR, "watches.json")  # persisted multi-post watch list
 LOOKBACK_SECONDS = 48 * 3600  # auto-reply also covers comments this far back
+MAX_PER_CYCLE = 5  # max replies per watch per check — sab posts ko baari mile
 WATCH_LOCK = threading.Lock()  # guards watches.json
 
 
@@ -632,6 +633,7 @@ def _process_watch(w):
         return
     comments = _fetch_all_comments(w["post_id"], tok)
     stats["seen"] = len(comments)
+    stats["last_error"] = None  # check safal raha — purana error hata do
     stats["last_check"] = datetime.now(timezone.utc).isoformat()
     with STATE_LOCK:
         done = set(load_state().get(w["post_id"], []))
@@ -654,7 +656,11 @@ def _process_watch(w):
         delay = max(20, int(w.get("delay", 60)))
     except (TypeError, ValueError):
         delay = 60
+    sent_now = 0
     for i, c in enumerate(fresh):
+        if sent_now >= MAX_PER_CYCLE:
+            break  # baaki agle cycle me — ek post ki lambi queue dusri
+            # posts ko ghanton nahi rokegi; sab ko baari-baari milega
         if MANAGER["stop"].is_set() or not _watch_still_active(w):
             break
         # User's rule (2026-10-23): reply even if the Page already replied
@@ -674,6 +680,7 @@ def _process_watch(w):
             save_state(state)
         _bump_sent_total(w)
         stats["sent"] += 1
+        sent_now += 1
         stats["waiting"] = max(0, stats["waiting"] - 1)
         stats["last_reply_to"] = (c.get("from") or {}).get("name", "?")
         if i < len(fresh) - 1:
