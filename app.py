@@ -355,10 +355,22 @@ def api_pages():
     tok = session.get("user_token")
     if not tok:
         return jsonify({"error": "Not logged in"}), 401
-    data = graph_get("/me/accounts", {"access_token": tok, "fields": "id,name"})
+    data = graph_get("/me/accounts", {"access_token": tok, "fields": "id,name,access_token"})
     pages = [{"id": p["id"], "name": p.get("name", p["id"])} for p in data.get("data", [])]
     # stash page tokens server-side; only ids go to the browser
     tokens = {p["id"]: p["access_token"] for p in data.get("data", []) if p.get("access_token")}
+    # /me/accounts can still omit a Page's access_token (e.g. Pages held in
+    # a business portfolio) — fetch any missing one straight from the Page
+    # node, which reliably returns it for an admin user token.
+    for p in data.get("data", []):
+        if p["id"] not in tokens:
+            try:
+                pd = graph_get(f"/{p['id']}", {
+                    "access_token": tok, "fields": "access_token"})
+                if pd.get("access_token"):
+                    tokens[p["id"]] = pd["access_token"]
+            except RuntimeError:
+                pass
     session["page_tokens"] = tokens
     # persist tokens in the server-side store — the watcher reads them from
     # here, never from the browser session
