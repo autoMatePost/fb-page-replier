@@ -74,7 +74,7 @@ except ValueError:
     POLL_INTERVAL = 120
 
 GRAPH = "https://graph.facebook.com/v22.0"
-SCOPES = "pages_read_engagement,pages_manage_posts,pages_manage_engagement"
+SCOPES = "pages_show_list,pages_read_engagement,pages_read_user_content,pages_manage_posts,pages_manage_engagement"
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET", secrets.token_hex(24))
