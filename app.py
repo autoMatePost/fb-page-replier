@@ -39,6 +39,7 @@ STATE_LOCK = threading.Lock()  # guards sent_replies.json between UI sends and t
 STORE_FILE = os.path.join(BASE_DIR, "fb_store.json")  # server-side tokens: user token + page tokens
 STORE_LOCK = threading.Lock()  # guards fb_store.json
 WATCHES_FILE = os.path.join(BASE_DIR, "watches.json")  # persisted multi-post watch list
+LOOKBACK_SECONDS = 48 * 3600  # auto-reply also covers comments this far back
 WATCH_LOCK = threading.Lock()  # guards watches.json
 
 
@@ -130,10 +131,35 @@ def load_watches():
         try:
             with open(WATCHES_FILE, encoding="utf-8") as f:
                 data = json.load(f)
-            return data if isinstance(data, list) else []
+            if isinstance(data, list) and data:
+                return data
         except (json.JSONDecodeError, OSError):
-            return []
-    return []
+            pass
+    return _restore_seed_watches()
+
+
+def _restore_seed_watches():
+    """After a redeploy the host's disk is wiped and watches.json is gone.
+    If the repo carries a watches_seed.json (the user's backed-up watch
+    list), restore from it. started_ts is moved to LOOKBACK_SECONDS
+    before the restore moment, so the last 48h of comments are covered
+    too (the user wants recent comments answered, not only future ones)."""
+    seed_path = os.path.join(BASE_DIR, "watches_seed.json")
+    if not os.path.exists(seed_path):
+        return []
+    try:
+        with open(seed_path, encoding="utf-8") as f:
+            seed = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(seed, list) or not seed:
+        return []
+    now = datetime.now(timezone.utc).timestamp()
+    for w in seed:
+        if isinstance(w, dict):
+            w["started_ts"] = now - LOOKBACK_SECONDS
+    save_watches(seed)
+    return seed
 
 
 def save_watches(watches):
@@ -446,7 +472,7 @@ def api_comments():
         fresh = []
         for c in comments:
             try:
-                ts = datetime.fromisoformat(c["created_time"].replace("Z", "+00:00")).timestamp()
+                ts = _parse_ts(c["created_time"])
             except (KeyError, ValueError):
                 continue
             if ts < cutoff:
@@ -459,15 +485,6 @@ def api_comments():
                 "from_name": (c.get("from") or {}).get("name", "?"),
                 "created_time": c["created_time"],
             })
-
-        # Live dedup: drop comments the Page has already replied to from ANY
-        # source — another auto-reply tool, a manual reply, or an earlier
-        # run. The local sent-log below only knows THIS app's own replies,
-        # so without this check a comment another tool already answered
-        # would be listed again and get a second reply.
-        if page_id:
-            fresh = [c for c in fresh
-                     if not _page_already_replied(c["id"], page_id, tok)]
 
         state = load_state()
         already = set(state.get(post_id, []))
@@ -536,6 +553,22 @@ def _stats_for(key):
     })
 
 
+def _parse_ts(raw):
+    """Parse a Graph API created_time into a Unix timestamp.
+
+    Facebook returns values like ``2026-10-23T11:05:32+0000`` — the UTC
+    offset has NO colon, which datetime.fromisoformat rejects on
+    Python <= 3.10 (a comment whose time fails to parse would otherwise
+    be silently skipped). Normalise the offset (and a trailing 'Z')
+    before parsing so it works on every Python version."""
+    s = str(raw).strip()
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    elif len(s) >= 5 and s[-5] in "+-" and s[-3] != ":":
+        s = s[:-2] + ":" + s[-2:]
+    return datetime.fromisoformat(s).timestamp()
+
+
 def _fetch_all_comments(post_id, tok):
     comments = []
     url = f"{GRAPH}/{post_id}/comments"
@@ -598,6 +631,7 @@ def _process_watch(w):
                                "and open the dashboard once so tokens re-save.")
         return
     comments = _fetch_all_comments(w["post_id"], tok)
+    stats["seen"] = len(comments)
     stats["last_check"] = datetime.now(timezone.utc).isoformat()
     with STATE_LOCK:
         done = set(load_state().get(w["post_id"], []))
@@ -608,8 +642,7 @@ def _process_watch(w):
         if c["id"] in done:
             continue  # already replied earlier
         try:
-            ts = datetime.fromisoformat(
-                c["created_time"].replace("Z", "+00:00")).timestamp()
+            ts = _parse_ts(c["created_time"])
         except (KeyError, ValueError):
             continue
         if ts < float(w.get("started_ts") or 0):
@@ -624,20 +657,10 @@ def _process_watch(w):
     for i, c in enumerate(fresh):
         if MANAGER["stop"].is_set() or not _watch_still_active(w):
             break
-        try:
-            already = _page_already_replied(c["id"], w["page_id"], tok)
-        except RuntimeError as e:
-            # check failed — skip this cycle rather than risk a duplicate
-            stats["errors"] += 1
-            stats["last_error"] = f"dedup check {c['id']}: {e}"
-            continue
-        if already:
-            with STATE_LOCK:
-                state = load_state()
-                state.setdefault(w["post_id"], []).append(c["id"])
-                save_state(state)
-            stats["waiting"] = max(0, stats["waiting"] - 1)
-            continue
+        # User's rule (2026-10-23): reply even if the Page already replied
+        # to this comment from another tool — no dedup check here. The
+        # only repeats prevented are this app's OWN replies (the done-set
+        # above) and the Page's own comments.
         try:
             graph_post(f"/{c['id']}/comments", {
                 "access_token": tok, "message": w["text"]})
@@ -752,7 +775,7 @@ def api_watch_add():
                 "text": text,
                 "delay": delay,
                 "active": True,
-                "started_ts": time.time(),
+                "started_ts": time.time() - LOOKBACK_SECONDS,
                 "sent_total": 0,
             })
             save_watches(watches)

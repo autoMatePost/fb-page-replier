@@ -104,7 +104,7 @@
 <!-- WATCHED POSTS -->
 <div class="card" id="watchCard" style="display:none">
   <h2>⚡ Watched Posts — auto reply (kai posts ek sath)</h2>
-  <p class="sub">Jitne chaho utne posts add karo — har post ke liye apna reply text. Kisi post ko list me <b>add karne ke baad</b> jo naye comments aayenge, unko hi auto reply jayega; usse pehle wale comments ko nahi. Page ke khud ke comments skip hote hain, aur ek comment pe dobara reply kabhi nahi jayega. Purane comments ke liye upar wala manual tareeka (Step 3–4) use karo.</p>
+  <p class="sub">Jitne chaho utne posts add karo — har post ke liye apna reply text. Post add karte hi uske <b>pichhle 48 ghante ke comments</b> ko bhi auto reply jayega, aur uske baad aane wale har naye comment ko bhi — chahe us comment pe pehle se koi reply ho. Page ke khud ke comments skip hote hain, aur jis comment pe <b>is tool</b> ne ek baar reply kar diya, uspe dobara nahi jayega.</p>
   <label>Post / Reel link ya post ID</label>
   <input type="text" id="watchPostInput" placeholder="https://www.facebook.com/reel/123456789...">
   <div class="hint">Upar Step 2 me jo <b>Page</b> select hai, post usi Page ki honi chahiye. Address-bar wala link dalo — share links (/share/…) nahi chalenge.</div>
@@ -246,8 +246,9 @@ function renderWatches(d){
   WATCHES.forEach((w,i)=>{
     const s = w.stats || {};
     const status = w.active ? '<span class="pill sent">Active</span>' : '<span class="pill pending">Paused</span>';
-    const last = s.last_error ? `<span style="color:#b3261e">${esc(s.last_error)}</span>`
-               : (s.last_check ? new Date(s.last_check).toLocaleTimeString() : '—');
+    const seen = (s.seen !== undefined) ? `<br><span class="hint">${s.seen} comments mile · ${s.waiting||0} naye pending</span>` : '';
+    const last = (s.last_error ? `<span style="color:#b3261e">${esc(s.last_error)}</span>`
+               : (s.last_check ? new Date(s.last_check).toLocaleTimeString() : '—')) + seen;
     html += `<tr><td class="msg">${esc(w.post_id)}</td><td>${esc(w.page_name || w.page_id)}</td><td>${status}</td>` +
       `<td>${w.sent_total||0} total<br><span class="hint">${s.sent||0} is session me</span></td><td class="msg">${last}</td>` +
       `<td><button class="secondary" onclick="toggleWatch(${i})">${w.active ? 'Pause' : 'Resume'}</button> ` +
