@@ -460,6 +460,15 @@ def api_comments():
                 "created_time": c["created_time"],
             })
 
+        # Live dedup: drop comments the Page has already replied to from ANY
+        # source — another auto-reply tool, a manual reply, or an earlier
+        # run. The local sent-log below only knows THIS app's own replies,
+        # so without this check a comment another tool already answered
+        # would be listed again and get a second reply.
+        if page_id:
+            fresh = [c for c in fresh
+                     if not _page_already_replied(c["id"], page_id, tok)]
+
         state = load_state()
         already = set(state.get(post_id, []))
         todo = [c for c in fresh if c["id"] not in already]
